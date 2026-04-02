@@ -1,0 +1,34 @@
+{
+  "name": "quescade-stage0-stage1-starter",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "latest",
+    "@prisma/adapter-pg": "^7.0.0",
+    "@prisma/client": "^7.0.0",
+    "adm-zip": "^0.5.17",
+    "dotenv": "^17.0.0",
+    "next": "latest",
+    "pg": "^8.0.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "prisma": "^7.0.0",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

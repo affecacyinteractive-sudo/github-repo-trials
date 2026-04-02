@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Provider {
+  github
+}
+
+enum ResolvedRefType {
+  default_branch
+  branch
+  tag
+  commit
+}
+
+enum ArchiveFormat {
+  zip
+  tarball
+}
+
+enum SnapshotIngestStatus {
+  queued
+  metadata_resolved
+  archive_stored
+  unpacked
+  manifest_built
+  blocks_extracted
+  completed
+  failed
+}
+
+enum FileParseStatus {
+  pending
+  parsed
+  skipped
+  failed
+}
+
+enum IngestJobStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum IngestCurrentStep {
+  queued
+  resolve_metadata
+  download_archive
+  upload_archive
+  unpack_archive
+  classify_files
+  persist_manifest
+  extract_blocks
+  finalize
+  failed
+}
+
+enum CodeBlockKind {
+  function
+  method
+  class
+  interface
+  type
+  test_block
+}
+
+enum ExtractionMode {
+  semantic
+}
+
+model SourceRepo {
+  id            String           @id @db.Uuid
+  provider      Provider
+  owner         String
+  repoName      String           @map("repo_name")
+  canonicalUrl  String           @unique @map("canonical_url")
+  defaultBranch String?          @map("default_branch")
+  isPublic      Boolean          @default(true) @map("is_public")
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  snapshots     SourceSnapshot[]
+
+  @@unique([provider, owner, repoName])
+  @@index([owner])
+  @@index([repoName])
+  @@map("source_repos")
+}
+
+model SourceSnapshot {
+  id                    String               @id @db.Uuid
+  sourceRepoId          String               @map("source_repo_id") @db.Uuid
+  requestedRef          String?              @map("requested_ref")
+  resolvedRefType       ResolvedRefType?     @map("resolved_ref_type")
+  commitSha             String               @map("commit_sha")
+  archiveFormat         ArchiveFormat        @default(zip) @map("archive_format")
+  archiveS3Key          String?              @map("archive_s3_key")
+  archiveChecksumSha256 String?              @map("archive_checksum_sha256")
+  archiveSizeBytes      BigInt?              @map("archive_size_bytes")
+  detectedLicenseSpdx   String?              @map("detected_license_spdx")
+  detectedLicenseName   String?              @map("detected_license_name")
+  githubRepoNodeId      String?              @map("github_repo_node_id")
+  ingestStatus          SnapshotIngestStatus @default(queued) @map("ingest_status")
+  ingestRulesVersion    Int                  @default(1) @map("ingest_rules_version")
+  ingestedAt            DateTime?            @map("ingested_at") @db.Timestamptz(6)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceRepo            SourceRepo           @relation(fields: [sourceRepoId], references: [id], onDelete: Cascade)
+  files                 SourceFile[]
+  codeBlocks            CodeBlock[]
+  ingestJobs            IngestJob[]
+
+  @@unique([sourceRepoId, commitSha])
+  @@index([ingestStatus])
+  @@index([createdAt(sort: Desc)])
+  @@map("source_snapshots")
+}
+
+model SourceFile {
+  id             String          @id @db.Uuid
+  snapshotId     String          @map("snapshot_id") @db.Uuid
+  path           String
+  fileName       String          @map("file_name")
+  extension      String?
+  language       String?
+  mimeType       String?         @map("mime_type")
+  sizeBytes      BigInt          @map("size_bytes")
+  sha256         String?
+  textS3Key      String?         @map("text_s3_key")
+  isBinary       Boolean         @default(false) @map("is_binary")
+  isGenerated    Boolean         @default(false) @map("is_generated")
+  isExcluded     Boolean         @default(false) @map("is_excluded")
+  excludedReason String?         @map("excluded_reason")
+  parseStatus    FileParseStatus @default(pending) @map("parse_status")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  snapshot       SourceSnapshot  @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  codeBlocks     CodeBlock[]
+
+  @@unique([snapshotId, path])
+  @@index([snapshotId, language])
+  @@index([snapshotId, isExcluded])
+  @@index([snapshotId, parseStatus])
+  @@map("source_files")
+}
+
+model CodeBlock {
+  id             String         @id @db.Uuid
+  snapshotId     String         @map("snapshot_id") @db.Uuid
+  fileId         String         @map("file_id") @db.Uuid
+  blockKind      CodeBlockKind  @map("block_kind")
+  symbolName     String?        @map("symbol_name")
+  parentSymbol   String?        @map("parent_symbol")
+  language       String?
+  startLine      Int            @map("start_line")
+  endLine        Int            @map("end_line")
+  byteStart      Int?           @map("byte_start")
+  byteEnd        Int?           @map("byte_end")
+  contentHash    String         @map("content_hash")
+  contentText    String         @map("content_text")
+  extractionMode ExtractionMode @default(semantic) @map("extraction_mode")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  snapshot       SourceSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  file           SourceFile     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, blockKind, symbolName, startLine, endLine])
+  @@index([snapshotId])
+  @@index([fileId])
+  @@index([snapshotId, blockKind])
+  @@index([snapshotId, symbolName])
+  @@map("code_blocks")
+}
+
+model IngestJob {
+  id           String           @id @db.Uuid
+  snapshotId   String           @map("snapshot_id") @db.Uuid
+  status       IngestJobStatus  @default(queued)
+  currentStep  IngestCurrentStep @default(queued) @map("current_step")
+  retryCount   Int              @default(0) @map("retry_count")
+  errorCode    String?          @map("error_code")
+  errorMessage String?          @map("error_message")
+  startedAt    DateTime?        @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime?        @map("finished_at") @db.Timestamptz(6)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  snapshot     SourceSnapshot   @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId])
+  @@index([status])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("ingest_jobs")
+}
