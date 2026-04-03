@@ -9,13 +9,48 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
+    volumes:
+      - quescade_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d quescade"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+
+  app:
+    build:
+      context: .
+      target: dev
+    container_name: quescade-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/quescade?schema=public
+      ARCHIVE_STORAGE_ROOT: /app/.quescade-blob
+      WATCHPACK_POLLING: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports:
+      - "3000:3000"
     volumes:
-      - quescade-postgres-data:/var/lib/postgresql/data
+      - .:/app
+      - quescade_node_modules:/app/node_modules
+      - quescade_next_cache:/app/.next
+      - quescade_blob_store:/app/.quescade-blob
+    command: >
+      sh -lc "
+      npm install &&
+      npm run ts:prepare-wasm &&
+      npx prisma generate &&
+      npm run dev -- --hostname 0.0.0.0 --port 3000
+      "
 
 volumes:
-  quescade-postgres-data:
+  quescade_postgres_data:
+  quescade_node_modules:
+  quescade_next_cache:
+  quescade_blob_store:

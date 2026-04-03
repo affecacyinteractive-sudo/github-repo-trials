@@ -14,10 +14,7 @@ export async function storeArchiveBuffer(input: {
     key: string;
     body: Buffer;
 }): Promise<StoredArchive> {
-    const root =
-        process.env.ARCHIVE_STORAGE_ROOT?.trim() ||
-        path.join(process.cwd(), ".quescade-blob");
-
+    const root = getArchiveStorageRoot();
     const key = normalizeArchiveKey(input.key);
     const absolutePath = path.join(root, key);
 
@@ -34,15 +31,34 @@ export async function storeArchiveBuffer(input: {
     };
 }
 
+export async function readStoredArchiveBuffer(key: string): Promise<Buffer> {
+    const root = getArchiveStorageRoot();
+    const normalizedKey = normalizeArchiveKey(key);
+    const absolutePath = path.join(root, normalizedKey);
+
+    try {
+        return await fs.readFile(absolutePath);
+    } catch {
+        throw new AppError(
+            "archive_not_found",
+            `Stored archive not found for key "${normalizedKey}".`,
+            404
+        );
+    }
+}
+
+function getArchiveStorageRoot() {
+    return (
+        process.env.ARCHIVE_STORAGE_ROOT?.trim() ||
+        path.join(process.cwd(), ".quescade-blob")
+    );
+}
+
 function normalizeArchiveKey(key: string) {
     const normalized = key.replace(/\\/g, "/").replace(/^\/+/, "");
 
     if (!normalized || normalized.includes("..")) {
-        throw new AppError(
-            "invalid_archive_key",
-            "Archive key is invalid.",
-            500
-        );
+        throw new AppError("invalid_archive_key", "Archive key is invalid.", 500);
     }
 
     return normalized;

@@ -1,19 +1,39 @@
 // import crypto from "node:crypto";
 // import { prisma } from "@/lib/db";
-// import { getGithubRepositoryLicense, getGithubRepositoryMetadata, resolveGithubRef } from "@/lib/github-api";
+// import {
+//     getGithubRepositoryLicense,
+//     getGithubRepositoryMetadata,
+//     resolveGithubRef
+// } from "@/lib/github-api";
 // import { parseGithubRepoUrl } from "@/lib/github-url";
+// import { persistPinnedArchiveForSnapshot } from "@/lib/archive-ingest-service";
+// import { buildSourceFileManifestFromStoredArchive } from "@/lib/manifest-service";
 //
 // type IngestInput = {
 //     repoUrl: string;
 //     ref?: string;
 // };
 //
+// const SNAPSHOT_DONE_STATUSES = new Set([
+//     "manifest_built",
+//     "blocks_extracted",
+//     "completed"
+// ]);
+//
 // export async function ingestGithubRepository(input: IngestInput) {
 //     const parsed = parseGithubRepoUrl(input.repoUrl);
 //     const requestedRef = normalizeRef(input.ref) ?? parsed.refFromUrl;
 //
-//     const repoMetadata = await getGithubRepositoryMetadata(parsed.owner, parsed.repoName);
-//     const licenseMetadata = await getGithubRepositoryLicense(parsed.owner, parsed.repoName);
+//     const repoMetadata = await getGithubRepositoryMetadata(
+//         parsed.owner,
+//         parsed.repoName
+//     );
+//
+//     const licenseMetadata = await getGithubRepositoryLicense(
+//         parsed.owner,
+//         parsed.repoName
+//     );
+//
 //     const resolvedRef = await resolveGithubRef(
 //         parsed.owner,
 //         parsed.repoName,
@@ -21,7 +41,7 @@
 //         repoMetadata.defaultBranch
 //     );
 //
-//     const result = await prisma.$transaction(async (tx) => {
+//     const prep = await prisma.$transaction(async (tx) => {
 //         const repo = await tx.sourceRepo.upsert({
 //             where: {
 //                 canonicalUrl: parsed.canonicalUrl
@@ -73,27 +93,27 @@
 //         } else {
 //             reused = true;
 //
-//             if (snapshot.ingestStatus === "queued") {
-//                 snapshot = await tx.sourceSnapshot.update({
-//                     where: { id: snapshot.id },
-//                     data: {
-//                         requestedRef: requestedRef ?? snapshot.requestedRef,
-//                         resolvedRefType: resolvedRef.resolvedRefType,
-//                         detectedLicenseSpdx:
-//                             licenseMetadata?.spdxId ?? snapshot.detectedLicenseSpdx,
-//                         detectedLicenseName:
-//                             licenseMetadata?.name ?? snapshot.detectedLicenseName,
-//                         githubRepoNodeId: repoMetadata.nodeId,
-//                         ingestStatus: "metadata_resolved"
-//                     }
-//                 });
-//             }
+//             snapshot = await tx.sourceSnapshot.update({
+//                 where: { id: snapshot.id },
+//                 data: {
+//                     requestedRef: requestedRef ?? snapshot.requestedRef,
+//                     resolvedRefType: resolvedRef.resolvedRefType,
+//                     detectedLicenseSpdx:
+//                         licenseMetadata?.spdxId ?? snapshot.detectedLicenseSpdx,
+//                     detectedLicenseName:
+//                         licenseMetadata?.name ?? snapshot.detectedLicenseName,
+//                     githubRepoNodeId: repoMetadata.nodeId
+//                 }
+//             });
 //         }
 //
-//         if (snapshot.ingestStatus === "completed") {
+//         if (
+//             SNAPSHOT_DONE_STATUSES.has(snapshot.ingestStatus) &&
+//             snapshot.archiveS3Key
+//         ) {
 //             return {
-//                 repo: mapRepo(repo),
-//                 snapshot: mapSnapshot(snapshot),
+//                 repo,
+//                 snapshot,
 //                 job: null,
 //                 reused: true
 //             };
@@ -124,14 +144,56 @@
 //         }
 //
 //         return {
-//             repo: mapRepo(repo),
-//             snapshot: mapSnapshot(snapshot),
-//             job: mapJob(job),
+//             repo,
+//             snapshot,
+//             job,
 //             reused
 //         };
 //     });
 //
-//     return result;
+//     if (!prep.job) {
+//         return {
+//             repo: mapRepo(prep.repo),
+//             snapshot: mapSnapshot(prep.snapshot),
+//             job: null,
+//             reused: prep.reused
+//         };
+//     }
+//
+//     let currentSnapshot = prep.snapshot;
+//     let currentJob = prep.job;
+//
+//     if (!currentSnapshot.archiveS3Key) {
+//         const archiveResult = await persistPinnedArchiveForSnapshot({
+//             snapshotId: currentSnapshot.id,
+//             jobId: currentJob.id,
+//             owner: parsed.owner,
+//             repoName: parsed.repoName,
+//             commitSha: resolvedRef.commitSha,
+//             archiveFormat: "zip"
+//         });
+//
+//         currentSnapshot = archiveResult.snapshot;
+//         currentJob = archiveResult.job;
+//     }
+//
+//     if (currentSnapshot.ingestStatus !== "manifest_built") {
+//         const manifestResult = await buildSourceFileManifestFromStoredArchive({
+//             snapshotId: currentSnapshot.id,
+//             jobId: currentJob.id,
+//             archiveKey: currentSnapshot.archiveS3Key!
+//         });
+//
+//         currentSnapshot = manifestResult.snapshot;
+//         currentJob = manifestResult.job;
+//     }
+//
+//     return {
+//         repo: mapRepo(prep.repo),
+//         snapshot: mapSnapshot(currentSnapshot),
+//         job: mapJob(currentJob),
+//         reused: prep.reused
+//     };
 // }
 //
 // function normalizeRef(ref?: string) {
@@ -157,6 +219,12 @@
 //         commitSha: snapshot.commitSha,
 //         detectedLicenseSpdx: snapshot.detectedLicenseSpdx,
 //         ingestStatus: snapshot.ingestStatus,
+//         archiveS3Key: snapshot.archiveS3Key ?? null,
+//         archiveChecksumSha256: snapshot.archiveChecksumSha256 ?? null,
+//         archiveSizeBytes:
+//             snapshot.archiveSizeBytes == null
+//                 ? null
+//                 : Number(snapshot.archiveSizeBytes),
 //         createdAt: snapshot.createdAt,
 //         ingestedAt: snapshot.ingestedAt ?? null
 //     };
@@ -168,7 +236,11 @@
 //         status: job.status,
 //         currentStep: job.currentStep,
 //         retryCount: job.retryCount,
-//         createdAt: job.createdAt
+//         createdAt: job.createdAt,
+//         startedAt: job.startedAt ?? null,
+//         finishedAt: job.finishedAt ?? null,
+//         errorCode: job.errorCode ?? null,
+//         errorMessage: job.errorMessage ?? null
 //     };
 // }
 
@@ -181,19 +253,15 @@ import {
 } from "@/lib/github-api";
 import { parseGithubRepoUrl } from "@/lib/github-url";
 import { persistPinnedArchiveForSnapshot } from "@/lib/archive-ingest-service";
+import { buildSourceFileManifestFromStoredArchive } from "@/lib/manifest-service";
+import { extractStructuralCodeBlocksForSnapshot } from "@/lib/block-extraction-service";
 
 type IngestInput = {
     repoUrl: string;
     ref?: string;
 };
 
-const SNAPSHOT_READY_STATUSES = new Set([
-    "archive_stored",
-    "unpacked",
-    "manifest_built",
-    "blocks_extracted",
-    "completed"
-]);
+const SNAPSHOT_DONE_STATUSES = new Set(["blocks_extracted", "completed"]);
 
 export async function ingestGithubRepository(input: IngestInput) {
     const parsed = parseGithubRepoUrl(input.repoUrl);
@@ -283,15 +351,14 @@ export async function ingestGithubRepository(input: IngestInput) {
         }
 
         if (
-            SNAPSHOT_READY_STATUSES.has(snapshot.ingestStatus) &&
-            snapshot.archiveS3Key
+            snapshot.archiveS3Key &&
+            SNAPSHOT_DONE_STATUSES.has(snapshot.ingestStatus)
         ) {
             return {
                 repo,
                 snapshot,
                 job: null,
-                reused: true,
-                shouldPersistArchive: false
+                reused: true
             };
         }
 
@@ -323,33 +390,68 @@ export async function ingestGithubRepository(input: IngestInput) {
             repo,
             snapshot,
             job,
-            reused,
-            shouldPersistArchive: true
+            reused
         };
     });
 
-    if (!prep.shouldPersistArchive || !prep.job) {
+    if (!prep.job) {
         return {
             repo: mapRepo(prep.repo),
             snapshot: mapSnapshot(prep.snapshot),
-            job: prep.job ? mapJob(prep.job) : null,
+            job: null,
             reused: prep.reused
         };
     }
 
-    const persisted = await persistPinnedArchiveForSnapshot({
-        snapshotId: prep.snapshot.id,
-        jobId: prep.job.id,
-        owner: parsed.owner,
-        repoName: parsed.repoName,
-        commitSha: resolvedRef.commitSha,
-        archiveFormat: "zip"
-    });
+    let currentSnapshot = prep.snapshot;
+    let currentJob = prep.job;
+
+    if (!currentSnapshot.archiveS3Key) {
+        const archiveResult = await persistPinnedArchiveForSnapshot({
+            snapshotId: currentSnapshot.id,
+            jobId: currentJob.id,
+            owner: parsed.owner,
+            repoName: parsed.repoName,
+            commitSha: resolvedRef.commitSha,
+            archiveFormat: "zip"
+        });
+
+        currentSnapshot = archiveResult.snapshot;
+        currentJob = archiveResult.job;
+    }
+
+    if (
+        currentSnapshot.ingestStatus !== "manifest_built" &&
+        currentSnapshot.ingestStatus !== "blocks_extracted" &&
+        currentSnapshot.ingestStatus !== "completed"
+    ) {
+        const manifestResult = await buildSourceFileManifestFromStoredArchive({
+            snapshotId: currentSnapshot.id,
+            jobId: currentJob.id,
+            archiveKey: currentSnapshot.archiveS3Key!
+        });
+
+        currentSnapshot = manifestResult.snapshot;
+        currentJob = manifestResult.job;
+    }
+
+    if (
+        currentSnapshot.ingestStatus !== "blocks_extracted" &&
+        currentSnapshot.ingestStatus !== "completed"
+    ) {
+        const extractionResult = await extractStructuralCodeBlocksForSnapshot({
+            snapshotId: currentSnapshot.id,
+            jobId: currentJob.id
+        });
+
+        currentSnapshot = extractionResult.snapshot;
+        currentJob = extractionResult.job;
+    }
 
     return {
         repo: mapRepo(prep.repo),
-        snapshot: mapSnapshot(persisted.snapshot),
-        job: mapJob(persisted.job),
+        snapshot: mapSnapshot(currentSnapshot),
+        job: mapJob(currentJob),
         reused: prep.reused
     };
 }

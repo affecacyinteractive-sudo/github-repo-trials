@@ -621,6 +621,61 @@ __turbopack_context__.s([
     "GET",
     ()=>GET
 ]);
+// import { prisma } from "@/lib/db";
+// import { AppError } from "@/lib/errors";
+// import { fail, ok, toAppError } from "@/lib/http";
+// import { getBlobStore } from "@/lib/storage";
+//
+// type Params = {
+//   params: Promise<{ fileId: string }>;
+// };
+//
+// export async function GET(_: Request, { params }: Params) {
+//   try {
+//     const { fileId } = await params;
+//
+//     const file = await prisma.sourceFile.findUnique({
+//       where: { id: fileId },
+//       include: {
+//         codeBlocks: {
+//           orderBy: { startLine: "asc" }
+//         }
+//       }
+//     });
+//
+//     if (!file) {
+//       throw new AppError("file_not_found", "The requested file was not found.", 404);
+//     }
+//
+//     const blobStore = getBlobStore();
+//     const content = file.textS3Key ? await blobStore.getText(file.textS3Key) : null;
+//
+//     return ok({
+//       id: file.id,
+//       snapshotId: file.snapshotId,
+//       path: file.path,
+//       fileName: file.fileName,
+//       extension: file.extension ?? null,
+//       language: file.language ?? null,
+//       sizeBytes: Number(file.sizeBytes),
+//       isBinary: file.isBinary,
+//       isGenerated: file.isGenerated,
+//       isExcluded: file.isExcluded,
+//       excludedReason: file.excludedReason ?? null,
+//       parseStatus: file.parseStatus,
+//       content,
+//       blocks: file.codeBlocks.map((block) => ({
+//         id: block.id,
+//         blockKind: block.blockKind,
+//         symbolName: block.symbolName ?? null,
+//         startLine: block.startLine,
+//         endLine: block.endLine
+//       }))
+//     });
+//   } catch (error) {
+//     return fail(toAppError(error));
+//   }
+// }
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/lib/db.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$errors$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/lib/errors.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$http$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/lib/http.ts [app-route] (ecmascript)");
@@ -652,7 +707,7 @@ async function GET(_, { params }) {
             throw new __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$errors$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["AppError"]("file_not_found", "The requested file was not found.", 404);
         }
         const blobStore = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$storage$2f$index$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["getBlobStore"])();
-        const content = file.textS3Key ? await blobStore.getText(file.textS3Key) : null;
+        const content = file.isBinary || !file.textS3Key ? null : await blobStore.getText(file.textS3Key);
         return (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$http$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["ok"])({
             id: file.id,
             snapshotId: file.snapshotId,

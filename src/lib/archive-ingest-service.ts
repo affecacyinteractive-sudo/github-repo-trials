@@ -21,6 +21,7 @@ export async function persistPinnedArchiveForSnapshot(
             status: "running",
             currentStep: "download_archive",
             startedAt: new Date(),
+            finishedAt: null,
             errorCode: null,
             errorMessage: null
         }
@@ -67,9 +68,8 @@ export async function persistPinnedArchiveForSnapshot(
         const job = await prisma.ingestJob.update({
             where: { id: input.jobId },
             data: {
-                status: "completed",
+                status: "running",
                 currentStep: "upload_archive",
-                finishedAt: new Date(),
                 errorCode: null,
                 errorMessage: null
             }

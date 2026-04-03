@@ -19,12 +19,19 @@ export async function GET(_: Request, { params }: Params) {
       }
     });
 
+    const [files, excludedFiles, parsedFiles, codeBlocks] = await Promise.all([
+      prisma.sourceFile.count({ where: { snapshotId } }),
+      prisma.sourceFile.count({ where: { snapshotId, isExcluded: true } }),
+      prisma.sourceFile.count({ where: { snapshotId, parseStatus: "parsed" } }),
+      prisma.codeBlock.count({ where: { snapshotId } })
+    ]);
+
     if (!snapshot) {
       throw new AppError("snapshot_not_found", "The requested snapshot was not found.", 404);
     }
 
-    const excludedFiles = snapshot.files.filter((file) => file.isExcluded).length;
-    const parsedFiles = snapshot.files.filter((file) => file.parseStatus === "parsed").length;
+    // const excludedFiles = snapshot.files.filter((file) => file.isExcluded).length;
+    // const parsedFiles = snapshot.files.filter((file) => file.parseStatus === "parsed").length;
 
     return ok({
       id: snapshot.id,
@@ -50,10 +57,10 @@ export async function GET(_: Request, { params }: Params) {
       ingestedAt: snapshot.ingestedAt?.toISOString() ?? null,
       createdAt: snapshot.createdAt.toISOString(),
       counts: {
-        files: snapshot.files.length,
+        files,
         excludedFiles,
         parsedFiles,
-        codeBlocks: snapshot.codeBlocks.length
+        codeBlocks
       }
     });
   } catch (error) {

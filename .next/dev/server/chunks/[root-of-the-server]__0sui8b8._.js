@@ -487,11 +487,35 @@ async function GET(_, { params }) {
                 codeBlocks: true
             }
         });
+        const [files, excludedFiles, parsedFiles, codeBlocks] = await Promise.all([
+            __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["prisma"].sourceFile.count({
+                where: {
+                    snapshotId
+                }
+            }),
+            __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["prisma"].sourceFile.count({
+                where: {
+                    snapshotId,
+                    isExcluded: true
+                }
+            }),
+            __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["prisma"].sourceFile.count({
+                where: {
+                    snapshotId,
+                    parseStatus: "parsed"
+                }
+            }),
+            __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["prisma"].codeBlock.count({
+                where: {
+                    snapshotId
+                }
+            })
+        ]);
         if (!snapshot) {
             throw new __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$errors$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["AppError"]("snapshot_not_found", "The requested snapshot was not found.", 404);
         }
-        const excludedFiles = snapshot.files.filter((file)=>file.isExcluded).length;
-        const parsedFiles = snapshot.files.filter((file)=>file.parseStatus === "parsed").length;
+        // const excludedFiles = snapshot.files.filter((file) => file.isExcluded).length;
+        // const parsedFiles = snapshot.files.filter((file) => file.parseStatus === "parsed").length;
         return (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$http$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["ok"])({
             id: snapshot.id,
             archiveS3Key: snapshot.archiveS3Key ?? null,
@@ -515,10 +539,10 @@ async function GET(_, { params }) {
             ingestedAt: snapshot.ingestedAt?.toISOString() ?? null,
             createdAt: snapshot.createdAt.toISOString(),
             counts: {
-                files: snapshot.files.length,
+                files,
                 excludedFiles,
                 parsedFiles,
-                codeBlocks: snapshot.codeBlocks.length
+                codeBlocks
             }
         });
     } catch (error) {
